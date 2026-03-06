@@ -10,14 +10,29 @@
 ![Docker](https://img.shields.io/badge/Docker-Compose-blue)
 ![Airflow](https://img.shields.io/badge/Airflow-2.7.3-teal)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15-blue)
+![PowerBI](https://img.shields.io/badge/Power_BI-Dashboard-yellow)
 
 ---
 
 ## What is FraudLens?
 
-FraudLens is a **production-grade, real-time fraud detection engine** built specifically for the Indian fintech ecosystem. It simulates the kind of system used by companies like Razorpay, PhonePe, and CRED to detect fraudulent UPI transactions, NEFT transfers, and card payments in real time.
+FraudLens is a **production-grade, real-time fraud detection engine** built specifically for the Indian fintech ecosystem. It simulates the kind of system used at Razorpay, PhonePe, and CRED to detect fraudulent UPI transactions, NEFT transfers, and card payments in real time.
 
 The entire system is containerized with Docker and processes transactions end-to-end — from generation to ML scoring to dashboard visualization — with zero manual intervention.
+
+---
+
+## Live Dashboard
+
+The Power BI dashboard shows:
+
+- **Total Transactions** processed in real time
+- **Fraud Count** and **Fraud Rate %**
+- **Total Amount (INR)** flowing through the system
+- **Fraud by Merchant Category** — which merchants have highest fraud
+- **Fraud by Payment Method** — UPI vs NEFT vs Credit Card
+- **Fraud by Hour of Day** — when fraud spikes (2am-5am)
+- **Fraud by City** — world map showing fraud locations
 
 ---
 
@@ -50,7 +65,6 @@ Transaction Generator
      │
      ▼
   Power BI               ← live fraud analytics dashboard
- Dashboard
 ```
 
 ---
@@ -73,7 +87,7 @@ Transaction Generator
 
 ## Indian Fintech Context
 
-This project is built specifically for the Indian market:
+Built specifically for the Indian market:
 
 ```
 Currency        → INR (Indian Rupees)
@@ -87,28 +101,14 @@ Odd Hours       → Transactions between 12am–5am flagged
 
 ---
 
-## Features
-
-- **Real-time streaming** — processes 10 transactions per second via Kafka
-- **Feature engineering** — 10 features including is_odd_hour, is_foreign_city, is_high_amount
-- **ML fraud scoring** — XGBoost model with 1.0 ROC-AUC on test data
-- **Class imbalance handling** — scale_pos_weight = 49x for 2% fraud rate
-- **Redis caching** — predictions cached for 1 hour, same transaction never scored twice
-- **Automatic retraining** — Airflow triggers retraining every 10,000 new rows
-- **Power BI dashboard** — 8+ live visuals connected to FastAPI endpoints
-- **10 REST endpoints** — summary, hourly, daily, by-category, by-city, by-hour, alerts, model performance
-
----
-
 ## Project Structure
 
 ```
 fraudlens/
 ├── local/
-│   ├── docker-compose.yml          ← all 7 containers
+│   ├── docker-compose.yml          ← all 8 containers
 │   ├── data_generator/
 │   │   └── generator.py            ← Indian transaction generator
-│   ├── kafka/                      ← Kafka configuration
 │   ├── spark/
 │   │   └── spark_stream.py         ← Spark Structured Streaming job
 │   ├── ml/
@@ -116,18 +116,22 @@ fraudlens/
 │   │   ├── fraud_model.pkl         ← trained model (generated)
 │   │   └── label_encoders.pkl      ← category encoders (generated)
 │   ├── fastapi/
-│   │   └── main.py                 ← FastAPI fraud scoring API
+│   │   ├── main.py                 ← FastAPI fraud scoring API
+│   │   └── Dockerfile              ← FastAPI container
 │   ├── airflow/
 │   │   └── dags/
 │   │       └── fraud_pipeline.py   ← Airflow DAG
 │   └── warehouse/
 │       └── schema.sql              ← PostgreSQL schema
+├── fraudlens_dashboard.pbix        ← Power BI dashboard
 └── README.md
 ```
 
 ---
 
-## Prerequisites
+## Quick Start
+
+**Prerequisites:**
 
 - Docker Desktop
 - Python 3.11+
@@ -135,50 +139,65 @@ fraudlens/
 
 ---
 
-## Quick Start
-
-**Step 1 — Clone and start Docker:**
+### Step 1 — Clone repository
 
 ```powershell
-git clone https://github.com/YOURUSERNAME/fraudlens.git
+git clone https://github.com/harikrishnannm278-bot/fraudlens.git
 cd fraudlens/local
+```
+
+### Step 2 — Start all Docker containers
+
+```powershell
 docker-compose up -d
 ```
 
-**Step 2 — Install Python dependencies:**
+Wait 30 seconds then verify:
 
 ```powershell
-pip install kafka-python psycopg2-binary pandas xgboost scikit-learn joblib fastapi uvicorn redis
+docker ps
+# Should show 8 containers: zookeeper, kafka, kafka-ui, postgres, redis, spark, airflow, fastapi
 ```
 
-**Step 3 — Start the generator (Terminal 2):**
+### Step 3 — Create database tables
 
 ```powershell
+Get-Content warehouse/schema.sql | docker exec -i postgres psql -U fraud_user -d fraud_db
+```
+
+Then create the Indian fintech schema:
+
+```powershell
+docker exec postgres psql -U fraud_user -d fraud_db -c "DROP TABLE IF EXISTS transactions_enriched CASCADE; CREATE TABLE transactions_enriched (transaction_id VARCHAR(36) PRIMARY KEY, account_id VARCHAR(20) NOT NULL, amount_inr DECIMAL(12,2), merchant_name VARCHAR(200), merchant_category VARCHAR(50), payment_method VARCHAR(30), city VARCHAR(50), hour_of_day INT, day_of_week INT, is_odd_hour BOOLEAN, is_foreign_city BOOLEAN, is_high_amount BOOLEAN, is_weekend BOOLEAN, is_fraud INT, fraud_probability DECIMAL(6,4) DEFAULT NULL, risk_level VARCHAR(10) DEFAULT NULL, created_at TIMESTAMP DEFAULT NOW());"
+```
+
+### Step 4 — Start transaction generator
+
+```powershell
+# Open new terminal
 python local/data_generator/generator.py
 ```
 
-**Step 4 — Wait for 5,000+ rows then train model (Terminal 3):**
+### Step 5 — Verify data is flowing
 
 ```powershell
-docker exec spark python3 /train_model.py
-docker cp spark:/local/ml/fraud_model.pkl local/ml/fraud_model.pkl
-docker cp spark:/local/ml/label_encoders.pkl local/ml/label_encoders.pkl
+# Wait 2 minutes then check
+docker exec postgres psql -U fraud_user -d fraud_db -c "SELECT COUNT(*) FROM transactions_enriched;"
+# Should show growing number like 500, 1000, 2000...
 ```
 
-**Step 5 — Start FastAPI (Terminal 4):**
-
-```powershell
-cd local/fastapi
-python -m uvicorn main:app --reload --port 8000
-```
-
-**Step 6 — Verify everything is running:**
+### Step 6 — Open all dashboards
 
 ```
-Kafka UI   → http://localhost:8081
-FastAPI    → http://localhost:8000/docs
-Airflow    → http://localhost:8080  (admin/admin123)
+Kafka UI  → http://localhost:8081          (see messages flowing)
+FastAPI   → http://localhost:8000/docs     (test predictions)
+Airflow   → http://localhost:8080          (admin/admin123)
 ```
+
+### Step 7 — Open Power BI Dashboard
+
+- Open `fraudlens_dashboard.pbix` in Power BI Desktop
+- Click **Refresh** to load latest live data
 
 ---
 
@@ -190,7 +209,7 @@ Airflow    → http://localhost:8080  (admin/admin123)
 POST /predict
 ```
 
-Request:
+**Request body:**
 
 ```json
 {
@@ -206,13 +225,11 @@ Request:
 }
 ```
 
-Response:
+**Response:**
 
 ```json
 {
   "transaction_id": "txn-001",
-  "account_id": "IN1000042",
-  "amount_inr": 450000.0,
   "fraud_probability": 1.0,
   "is_fraud": true,
   "risk_level": "HIGH",
@@ -221,29 +238,35 @@ Response:
 }
 ```
 
-### Power BI Endpoints
+### Health Check
 
 ```
-GET /powerbi/summary                  → KPI cards
-GET /powerbi/transactions/hourly      → hourly trend
-GET /powerbi/transactions/daily       → daily summary
+GET /health
+```
+
+```json
+{ "status": "healthy", "model": "loaded", "redis": "connected" }
+```
+
+### Power BI Data Endpoints
+
+```
+GET /powerbi/summary                  → KPI metrics
+GET /powerbi/transactions/hourly      → hourly transaction trend
 GET /powerbi/fraud/by-category        → fraud by merchant category
 GET /powerbi/fraud/by-city            → fraud by city
 GET /powerbi/fraud/by-hour            → fraud by hour of day
 GET /powerbi/fraud/by-payment-method  → fraud by payment type
-GET /powerbi/fraud/by-risk-level      → alerts by risk level
-GET /powerbi/alerts/recent            → recent fraud alerts table
-GET /powerbi/accounts/top-flagged     → top flagged accounts
-GET /powerbi/model/performance        → precision, recall, F1, accuracy
+GET /powerbi/alerts/recent            → recent fraud alerts
 ```
 
 ---
 
-## ML Model
+## ML Model Details
 
 **Algorithm:** XGBoost Classifier
 
-**Features:**
+**10 Features used:**
 
 ```
 amount_inr           → transaction amount in INR
@@ -253,27 +276,20 @@ merchant_category    → encoded merchant type
 payment_method       → encoded payment method
 city                 → encoded transaction city
 is_odd_hour          → 1 if between 12am-5am
-is_foreign_city      → 1 if in high-risk city
+is_foreign_city      → 1 if in high-risk city (Lagos, Moscow etc)
 is_high_amount       → 1 if amount > ₹50,000
 is_weekend           → 1 if Saturday or Sunday
 ```
 
-**Results:**
+**Model Performance:**
 
 ```
 Training Data   → 51,534 transactions
-Fraud Rate      → 2.0% (1,034 fraud cases)
+Fraud Rate      → 2.0% (class imbalance handled with scale_pos_weight=49)
 ROC-AUC Score   → 1.0000
 Precision       → 1.00
 Recall          → 1.00
 F1 Score        → 1.00
-```
-
-**Class Imbalance:**
-
-```
-scale_pos_weight = 48.9x
-Handles 98% legit vs 2% fraud imbalance
 ```
 
 ---
@@ -285,11 +301,11 @@ Runs **every hour** automatically:
 ```
 start
   ↓
-data_quality_check     → verifies new transactions arrived
+data_quality_check     → verifies new transactions arrived in last hour
   ↓
 refresh_daily_summary  → rebuilds daily fraud summary table
   ↓
-should_retrain         → checks if 10,000 new rows exist
+should_retrain         → checks if 10,000+ new rows since last training
   ↓              ↓
 retrain_model   skip_retrain
   ↓              ↓
@@ -298,59 +314,27 @@ retrain_model   skip_retrain
 
 ---
 
-## Database Schema
+## Power BI Dashboard Setup
 
-**transactions_enriched** — main table written by Spark
+**Connect to live data:**
 
-```sql
-transaction_id      VARCHAR(36) PRIMARY KEY
-account_id          VARCHAR(20)
-amount_inr          DECIMAL(12,2)
-merchant_name       VARCHAR(200)
-merchant_category   VARCHAR(50)
-payment_method      VARCHAR(30)
-city                VARCHAR(50)
-hour_of_day         INT
-day_of_week         INT
-is_odd_hour         BOOLEAN
-is_foreign_city     BOOLEAN
-is_high_amount      BOOLEAN
-is_weekend          BOOLEAN
-is_fraud            INT
-fraud_probability   DECIMAL(6,4)
-risk_level          VARCHAR(10)
-created_at          TIMESTAMP
-```
+1. Open Power BI Desktop
+2. Home → Get Data → Web
+3. Add each URL as a separate table:
 
-**fraud_alerts** — written by FastAPI when probability ≥ 0.5
+| Table Name        | URL                                                   |
+| ----------------- | ----------------------------------------------------- |
+| summary           | http://localhost:8000/powerbi/summary                 |
+| by-category       | http://localhost:8000/powerbi/fraud/by-category       |
+| by-city           | http://localhost:8000/powerbi/fraud/by-city           |
+| by-hour           | http://localhost:8000/powerbi/fraud/by-hour           |
+| by-payment-method | http://localhost:8000/powerbi/fraud/by-payment-method |
+| hourly            | http://localhost:8000/powerbi/transactions/hourly     |
+| recent            | http://localhost:8000/powerbi/alerts/recent           |
 
-```sql
-alert_id            SERIAL PRIMARY KEY
-transaction_id      VARCHAR(36) UNIQUE
-account_id          VARCHAR(20)
-amount_inr          DECIMAL(12,2)
-city                VARCHAR(50)
-fraud_probability   DECIMAL(6,4)
-risk_level          VARCHAR(10)
-alerted_at          TIMESTAMP
-```
-
----
-
-## Power BI Dashboard
-
-Connect Power BI Desktop to these endpoints:
-
-| Visual             | Endpoint                         | Chart Type   |
-| ------------------ | -------------------------------- | ------------ |
-| Total Transactions | /powerbi/summary                 | Card         |
-| Fraud Rate %       | /powerbi/summary                 | Card         |
-| Hourly Trend       | /powerbi/transactions/hourly     | Line Chart   |
-| Fraud by Category  | /powerbi/fraud/by-category       | Bar Chart    |
-| Fraud by City      | /powerbi/fraud/by-city           | Map          |
-| Fraud by Hour      | /powerbi/fraud/by-hour           | Column Chart |
-| Payment Methods    | /powerbi/fraud/by-payment-method | Donut Chart  |
-| Recent Alerts      | /powerbi/alerts/recent           | Table        |
+4. For each URL: Connect → List → Into Table → Close & Apply
+5. Apply **Midnight** theme: View → Themes → Midnight
+6. Build visuals using connected tables
 
 ---
 
@@ -366,27 +350,21 @@ postgres     5432    Data warehouse
 redis        6379    Prediction cache
 spark        -       Stream processor
 airflow      8080    Pipeline orchestration
+fastapi      8000    ML scoring API
 ```
 
 ---
 
-## Restart Commands
+## Common Errors and Fixes
 
-```powershell
-# Start all services
-cd local
-docker-compose up -d
-
-# Terminal 2 - Generator
-python local/data_generator/generator.py
-
-# Terminal 3 - FastAPI
-cd local/fastapi
-python -m uvicorn main:app --reload --port 8000
-
-# Check data
-docker exec postgres psql -U fraud_user -d fraud_db -c "SELECT COUNT(*) FROM transactions_enriched;"
-```
+| Error                            | Fix                                                   |
+| -------------------------------- | ----------------------------------------------------- |
+| Generator: NoBrokersAvailable    | Docker not running — run `docker-compose up -d`       |
+| Spark: Name or service not known | Run `docker-compose down` then `docker-compose up -d` |
+| Tables don't exist               | Run schema commands from Step 3                       |
+| Airflow: Connection refused      | Check postgres is on fraudlens network                |
+| Power BI: empty data             | Verify FastAPI URL works in browser first             |
+| FastAPI: Model not loaded        | Check ml/fraud_model.pkl exists                       |
 
 ---
 
@@ -400,7 +378,7 @@ Local Docker     →    AWS Service
 Kafka            →    Amazon MSK
 Spark            →    Amazon EMR
 PostgreSQL       →    Amazon RDS
-FastAPI          →    AWS EC2 / Lambda
+FastAPI          →    AWS EC2
 Redis            →    ElastiCache
 Airflow          →    Amazon MWAA
 Power BI         →    stays same
@@ -412,12 +390,12 @@ Power BI         →    stays same
 
 - Real-time data streaming with Apache Kafka
 - Spark Structured Streaming with foreachBatch
-- XGBoost for imbalanced classification
+- XGBoost for imbalanced fraud classification
 - Feature engineering for fraud detection
 - Building production REST APIs with FastAPI
-- Docker multi-container orchestration
-- Airflow DAG design with branching
-- Power BI integration with REST APIs
+- Docker multi-container orchestration and networking
+- Airflow DAG design with branching logic
+- Power BI integration with REST API endpoints
 - PostgreSQL schema design for analytics
 - Redis caching for ML predictions
 

@@ -49,6 +49,11 @@ services:
       POSTGRES_USER: fraud_user
       POSTGRES_PASSWORD: fraud_pass
       POSTGRES_HOST_AUTH_METHOD: trust
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./warehouse/schema.sql:/docker-entrypoint-initdb.d/schema.sql
+    networks:
+      - fraudlens
 
   redis:
     image: redis:7
