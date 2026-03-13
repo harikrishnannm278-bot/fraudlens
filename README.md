@@ -138,10 +138,12 @@ fraudlens/
 
 **Step 1 — Clone and start Docker:**
 ```powershell
-git clone https://github.com/YOURUSERNAME/fraudlens.git
-cd fraudlens/local
+# Clone repository
+git clone https://github.com/harikrishnannm278-bot/fraudlens-data-engineering-pipeline.git
+# Navigate to project
+cd fraudlens-data-engineering-pipeline/local
+# Start services
 docker-compose up -d
-```
 
 **Step 2 — Install Python dependencies:**
 ```powershell
